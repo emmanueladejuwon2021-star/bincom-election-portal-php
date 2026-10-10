@@ -106,20 +106,11 @@ require_once __DIR__ . '/includes/navbar.php';
               <i class="bi bi-box-arrow-in-right me-1"></i> Sign In to Portal
             </button>
 
-            <!-- Demo Credentials Helper Card -->
             <div class="p-3 rounded-3 bg-light border text-center">
-              <div class="small text-muted mb-1">
-                <strong>Evaluation Credentials:</strong>
+              <div class="small text-muted">
+                <i class="bi bi-shield-check text-success me-1"></i>
+                Authorized electoral officers only. System access is recorded.
               </div>
-              <div class="font-monospace small text-dark mb-2">
-                Email: <code><?= htmlspecialchars(ADMIN_EMAIL) ?></code><br>
-                Password: <code><?= htmlspecialchars(ADMIN_PASSWORD) ?></code>
-              </div>
-              <button type="button" 
-                      id="fillDemoBtn" 
-                      class="btn btn-outline-secondary btn-sm py-1 px-3 small">
-                <i class="bi bi-magic me-1"></i> Auto-Fill Credentials
-              </button>
             </div>
 
           </form>
@@ -137,13 +128,6 @@ require_once __DIR__ . '/includes/navbar.php';
     </div>
   </div>
 </main>
-
-<script>
-  document.getElementById('fillDemoBtn')?.addEventListener('click', function() {
-    document.getElementById('adminEmail').value = '<?= addslashes(ADMIN_EMAIL) ?>';
-    document.getElementById('adminPassword').value = '<?= addslashes(ADMIN_PASSWORD) ?>';
-  });
-</script>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';

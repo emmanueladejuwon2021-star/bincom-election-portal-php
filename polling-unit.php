@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/config/db.php';
 
 $pageTitle = 'Polling Unit Results - Delta State Election Portal';

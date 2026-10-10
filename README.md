@@ -49,10 +49,7 @@ This web application presents the complete solution for the Bincom ICT Solutions
 To prevent unauthorized changes and ensure election integrity, recording new voting center returns (`new-polling-unit.php`) requires authorized officer login:
 
 - **Login Page**: `login.php`
-- **Default Evaluation Credentials**:
-  - Email: `admin@bincom.net`
-  - Password: `admin123`
-- **Custom Configuration**: On Render, you can set your own custom credentials using the `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables in your service dashboard.
+- **Configurable Credentials**: Administrator access is managed through the `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables in the hosting dashboard.
 - **Session Control**: Authorized officers can sign out at any time using the Sign Out option in the navigation bar (`logout.php`).
 
 ---

@@ -3,7 +3,7 @@
  * Authentication and Session Management
  */
 
-if (session_status() === PHP_SESSION_NONE) {
+if (!headers_sent() && session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
