@@ -21,7 +21,7 @@ try {
                WHERE r.polling_unit_uniqueid = pu.uniqueid OR CAST(r.polling_unit_uniqueid AS CHAR) = CAST(pu.uniqueid AS CHAR)) as has_results
             FROM polling_unit pu
             LEFT JOIN lga l ON pu.lga_id = l.lga_id
-            LEFT JOIN ward w ON pu.ward_id = w.ward_id
+            LEFT JOIN ward w ON pu.ward_id = w.ward_id AND pu.lga_id = w.lga_id
             WHERE pu.polling_unit_name LIKE ? 
                OR pu.polling_unit_number LIKE ? 
                OR pu.polling_unit_description LIKE ?

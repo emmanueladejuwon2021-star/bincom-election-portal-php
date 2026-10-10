@@ -416,6 +416,16 @@ require_once __DIR__ . '/includes/navbar.php';
     const clearBtn = document.getElementById('btnClearSearch');
     let searchDebounceTimer;
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     if (searchInput) {
       searchInput.addEventListener('input', function() {
         const query = this.value.trim();
@@ -425,7 +435,7 @@ require_once __DIR__ . '/includes/navbar.php';
           clearBtn.classList.toggle('d-none', query.length === 0);
         }
 
-        if (query.length < 1) {
+        if (query.length < 2) {
           searchResults.classList.add('d-none');
           searchResults.innerHTML = '';
           return;
@@ -437,17 +447,17 @@ require_once __DIR__ . '/includes/navbar.php';
             .then(res => {
               if (res.success && res.data.length > 0) {
                 searchResults.innerHTML = res.data.map(item => `
-                  <a href="polling-unit.php?id=${item.uniqueid}" class="list-group-item list-group-item-action py-2 px-3">
+                  <a href="polling-unit.php?id=${encodeURIComponent(item.uniqueid)}" class="list-group-item list-group-item-action py-2 px-3">
                     <div class="d-flex justify-content-between align-items-center mb-0.5">
-                      <strong class="text-dark small">${item.polling_unit_name}</strong>
+                      <strong class="text-dark small">${escapeHtml(item.polling_unit_name)}</strong>
                       ${item.has_results > 0 
                         ? '<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.65rem;">Certified Results</span>' 
                         : '<span class="badge bg-light text-muted border" style="font-size: 0.65rem;">Pending</span>'}
                     </div>
                     <div class="text-muted small" style="font-size: 0.72rem;">
-                      <span class="badge bg-light text-dark border px-1 py-0 me-1">${item.lga_name || 'Delta'}</span>
-                      <span>Ward: ${item.ward_name || 'Ward'}</span>
-                      <span class="ms-1">&bull; Code: <code>${item.polling_unit_number || 'N/A'}</code></span>
+                      <span class="badge bg-light text-dark border px-1 py-0 me-1">${escapeHtml(item.lga_name || 'Delta')}</span>
+                      <span>Ward: ${escapeHtml(item.ward_name || 'Ward')}</span>
+                      <span class="ms-1">&bull; Code: <code>${escapeHtml(item.polling_unit_number || 'N/A')}</code></span>
                     </div>
                   </a>
                 `).join('');
@@ -556,22 +566,29 @@ require_once __DIR__ . '/includes/navbar.php';
           const total = <?= json_encode($totalVotes) ?>;
           const results = <?= json_encode($puResults) ?>;
 
+          function safeCsv(val) {
+            let str = String(val ?? '');
+            if (/^[=+\-@]/.test(str)) str = "'" + str;
+            if (/[",\n\r]/.test(str)) str = '"' + str.replace(/"/g, '""') + '"';
+            return str;
+          }
+
           let csv = 'DELTA STATE OFFICIAL ELECTION RESULTS\n';
-          csv += `Polling Unit:,"${puName}"\n`;
-          csv += `Unit Code:,${puCode}\n`;
-          csv += `Unit ID:,${puId}\n`;
-          csv += `Local Government:,${lgaName}\n`;
-          csv += `Ward:,${wardName}\n`;
-          csv += `Total Certified Ballots:,${total}\n\n`;
+          csv += `Polling Unit:,${safeCsv(puName)}\n`;
+          csv += `Unit Code:,${safeCsv(puCode)}\n`;
+          csv += `Unit ID:,${safeCsv(puId)}\n`;
+          csv += `Local Government:,${safeCsv(lgaName)}\n`;
+          csv += `Ward:,${safeCsv(wardName)}\n`;
+          csv += `Total Certified Ballots:,${safeCsv(total)}\n\n`;
           csv += 'Rank,Party,Votes Counted,Percentage (%),Status\n';
 
           results.forEach((r, idx) => {
             const pct = total > 0 ? ((r.party_score / total) * 100).toFixed(2) : 0;
             const status = idx === 0 ? 'Winner' : 'Contested';
-            csv += `${idx + 1},${r.party_abbreviation},${r.party_score},${pct}%,${status}\n`;
+            csv += `${idx + 1},${safeCsv(r.party_abbreviation)},${safeCsv(r.party_score)},${pct}%,${safeCsv(status)}\n`;
           });
 
-          csv += `TOTAL,,${total},100.00%,Certified\n`;
+          csv += `TOTAL,,${safeCsv(total)},100.00%,Certified\n`;
 
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
           const url = URL.createObjectURL(blob);

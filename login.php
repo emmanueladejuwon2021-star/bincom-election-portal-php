@@ -5,49 +5,46 @@ $pageTitle = 'Officer Login - Delta State Election Portal';
 $currentPage = 'login';
 
 $error = null;
-$redirectTarget = isset($_GET['redirect']) ? trim($_GET['redirect']) : 'new-polling-unit.php';
+$redirectTarget = sanitizeRedirect($_GET['redirect'] ?? 'new-polling-unit.php', 'new-polling-unit.php');
 
-// Safe redirect validator: only allow relative paths within the app
-function isSafeRedirect(string $url): bool {
-    if ($url === '' || $url === '/') return false;
-    // Block protocol-relative, absolute URLs, and dangerous schemes
-    if (preg_match('#^(https?:)?//#i', $url) || preg_match('#^[a-z][a-z0-9+.-]*:#i', $url)) {
-        return false;
-    }
-    // Allow relative paths that don't traverse directories
-    if (str_contains($url, '..') || str_contains($url, '\\')) return false;
-    $path = parse_url($url, PHP_URL_PATH) ?: $url;
-    $base = basename($path);
-    $allowed = ['index.php', 'polling-unit.php', 'lga-total.php', 'new-polling-unit.php', 'login.php'];
-    return in_array($base, $allowed, true) || (!str_starts_with($url, '/') && !str_contains($url, '://'));
-}
-
-
-// If already logged in, redirect straight away
+// If already authenticated, redirect immediately
 if (isLoggedIn()) {
-    $dest = isSafeRedirect($redirectTarget) ? $redirectTarget : 'new-polling-unit.php';
-    header("Location: " . $dest);
+    header("Location: " . $redirectTarget);
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = isset($_POST['email']) ? trim($_POST['email']) : '';
     $password = isset($_POST['password']) ? trim($_POST['password']) : '';
-    $redirect = isset($_POST['redirect']) ? trim($_POST['redirect']) : 'new-polling-unit.php';
+    $redirect = sanitizeRedirect($_POST['redirect'] ?? 'new-polling-unit.php', 'new-polling-unit.php');
+    $csrfToken = $_POST['csrf_token'] ?? '';
 
-    if (empty($email) || empty($password)) {
+    // Rate limiting: check failed attempts cooldown
+    $failedCount = $_SESSION['failed_login_count'] ?? 0;
+    $lastFailedAt = $_SESSION['last_failed_login_at'] ?? 0;
+
+    if ($failedCount >= 5 && (time() - $lastFailedAt < 300)) {
+        $remaining = 300 - (time() - $lastFailedAt);
+        $error = "Too many failed attempts. Please wait {$remaining} seconds before trying again.";
+    } elseif (!verifyCsrfToken($csrfToken)) {
+        $error = "Session validation failed. Please refresh the page and try again.";
+    } elseif (empty($email) || empty($password)) {
         $error = "Please enter both your email address and password.";
     } elseif ($email === ADMIN_EMAIL && $password === ADMIN_PASSWORD) {
-        // Prevent session fixation
+        // Successful login: regenerate session ID to prevent session fixation
         session_regenerate_id(true);
+
         $_SESSION['admin_logged_in'] = true;
         $_SESSION['admin_email'] = $email;
         $_SESSION['login_time'] = time();
+        $_SESSION['last_activity'] = time();
+        unset($_SESSION['failed_login_count'], $_SESSION['last_failed_login_at']);
 
-        $destination = isSafeRedirect($redirect) ? $redirect : 'new-polling-unit.php';
-        header("Location: {$destination}");
+        header("Location: {$redirect}");
         exit;
     } else {
+        $_SESSION['failed_login_count'] = $failedCount + 1;
+        $_SESSION['last_failed_login_at'] = time();
         $error = "Incorrect email address or password. Please verify your credentials.";
     }
 }
@@ -80,7 +77,7 @@ require_once __DIR__ . '/includes/navbar.php';
             </div>
           <?php endif; ?>
 
-          <?php if (isset($_GET['redirect'])): ?>
+          <?php if (isset($_GET['redirect']) && empty($error)): ?>
             <div class="alert alert-warning d-flex align-items-center gap-2 mb-4 py-2" role="alert">
               <i class="bi bi-info-circle-fill"></i>
               <div class="small">Sign in to access the data entry portal.</div>
@@ -88,6 +85,7 @@ require_once __DIR__ . '/includes/navbar.php';
           <?php endif; ?>
 
           <form action="login.php" method="POST" autocomplete="on">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(getCsrfToken()) ?>">
             <input type="hidden" name="redirect" value="<?= htmlspecialchars($redirectTarget) ?>">
 
             <div class="mb-3">

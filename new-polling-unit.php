@@ -13,6 +13,10 @@ $errorMessage = null;
 // Handle Form Submission (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
+        if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+            throw new Exception("Security verification failed. Please refresh the page and try again.");
+        }
+
         $lgaId = isset($_POST['lga_id']) ? (int)$_POST['lga_id'] : 0;
         $wardId = isset($_POST['ward_id']) ? (int)$_POST['ward_id'] : 0;
         $puName = isset($_POST['polling_unit_name']) ? trim($_POST['polling_unit_name']) : '';
@@ -20,11 +24,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $puDesc = isset($_POST['polling_unit_description']) ? trim($_POST['polling_unit_description']) : '';
         $lat = isset($_POST['lat']) ? trim($_POST['lat']) : null;
         $long = isset($_POST['long']) ? trim($_POST['long']) : null;
-        $enteredBy = isset($_POST['entered_by_user']) && trim($_POST['entered_by_user']) !== '' ? trim($_POST['entered_by_user']) : 'INEC Presiding Officer';
+        $enteredBy = isset($_POST['entered_by_user']) && trim($_POST['entered_by_user']) !== '' ? trim($_POST['entered_by_user']) : (getLoggedInUser() ?? 'INEC Presiding Officer');
 
         if (!$lgaId || !$wardId || empty($puName)) {
             throw new Exception("Please select a Local Government, Ward, and enter the Polling Unit Name.");
         }
+
+        // Validate LGA belongs to Delta State
+        $lgaCheck = fetchOne("SELECT 1 FROM lga WHERE lga_id = ? AND state_id = 25", [$lgaId]);
+        if (!$lgaCheck) {
+            throw new Exception("Please select a valid Delta State Local Government Area.");
+        }
+
+        // Validate Ward belongs to the selected LGA
+        $wardCheck = fetchOne("SELECT 1 FROM ward WHERE ward_id = ? AND lga_id = ?", [$wardId, $lgaId]);
+        if (!$wardCheck) {
+            throw new Exception("The selected Ward does not belong to the selected Local Government.");
+        }
+
+        // Sanitize string lengths
+        $puName = mb_substr($puName, 0, 150);
+        $puNumber = mb_substr($puNumber, 0, 50);
+        $puDesc = mb_substr($puDesc, 0, 255);
+        $enteredBy = mb_substr($enteredBy, 0, 100);
 
         $userIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
         $nowStr = date('Y-m-d H:i:s');
@@ -84,8 +106,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         foreach ($parties as $p) {
             $key = 'party_' . $p['partyid'];
-            $rawScore = isset($_POST[$key]) ? (int)$_POST[$key] : 0;
-            $score = max(0, $rawScore);
+            $rawScore = filter_var($_POST[$key] ?? 0, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 0, 'max_range' => 500000]
+            ]);
+            $score = ($rawScore !== false) ? $rawScore : 0;
 
             $stmtScore->execute([
                 (string)$newPuUniqueId,
@@ -98,10 +122,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // 3. Optional: Insert Accredited Agent into agentname table
-        $agentFirst = isset($_POST['agent_firstname']) ? trim($_POST['agent_firstname']) : '';
-        $agentLast = isset($_POST['agent_lastname']) ? trim($_POST['agent_lastname']) : '';
-        $agentPhone = isset($_POST['agent_phone']) ? trim($_POST['agent_phone']) : '';
-        $agentEmail = isset($_POST['agent_email']) ? trim($_POST['agent_email']) : '';
+        $agentFirst = mb_substr(trim($_POST['agent_firstname'] ?? ''), 0, 100);
+        $agentLast = mb_substr(trim($_POST['agent_lastname'] ?? ''), 0, 100);
+        $agentPhone = mb_substr(trim($_POST['agent_phone'] ?? ''), 0, 25);
+        $rawEmail = trim($_POST['agent_email'] ?? '');
+        $agentEmail = filter_var($rawEmail, FILTER_VALIDATE_EMAIL) ? $rawEmail : null;
 
         if (!empty($agentFirst) && !empty($agentLast)) {
             $stmtAgent = $pdo->prepare(
@@ -116,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmtAgent->execute([
                 $agentFirst,
                 $agentLast,
-                !empty($agentEmail) ? $agentEmail : null,
+                $agentEmail,
                 !empty($agentPhone) ? $agentPhone : 'N/A',
                 $newPuUniqueId
             ]);
@@ -209,6 +234,7 @@ require_once __DIR__ . '/includes/navbar.php';
   <?php endif; ?>
 
   <form action="new-polling-unit.php" method="POST" id="newPuForm" class="needs-validation">
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(getCsrfToken()) ?>">
     <div class="row g-3">
       <!-- Section 1: Polling Unit Details (Left Column) -->
       <div class="col-lg-6">

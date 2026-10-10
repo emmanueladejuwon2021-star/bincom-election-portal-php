@@ -463,23 +463,30 @@ require_once __DIR__ . '/includes/navbar.php';
         const summed = <?= json_encode($summedResults) ?>;
         const comp = <?= json_encode($comparison) ?>;
 
+        function safeCsv(val) {
+          let str = String(val ?? '');
+          if (/^[=+\-@]/.test(str)) str = "'" + str;
+          if (/[",\n\r]/.test(str)) str = '"' + str.replace(/"/g, '""') + '"';
+          return str;
+        }
+
         let csv = 'DELTA STATE LOCAL GOVERNMENT COLLATION SHEET\n';
-        csv += 'Local Government:,"' + lgaName + '"\n';
-        csv += 'LGA ID:,' + lgaId + '\n';
-        csv += 'Total Grassroots PU Votes:,' + totalPu + '\n';
-        csv += 'Total Announced LGA Votes:,' + totalAnn + '\n\n';
+        csv += 'Local Government:,' + safeCsv(lgaName) + '\n';
+        csv += 'LGA ID:,' + safeCsv(lgaId) + '\n';
+        csv += 'Total Grassroots PU Votes:,' + safeCsv(totalPu) + '\n';
+        csv += 'Total Announced LGA Votes:,' + safeCsv(totalAnn) + '\n\n';
 
         csv += 'SECTION 1: AGGREGATED POLLING UNIT TOTALS\n';
         csv += 'Rank,Party,Summed Ballots,Percentage (%)\n';
         summed.forEach((s, i) => {
           const pct = totalPu > 0 ? ((s.total_score / totalPu) * 100).toFixed(2) : 0;
-          csv += (i + 1) + ',' + s.party_abbreviation + ',' + s.total_score + ',' + pct + '%\n';
+          csv += (i + 1) + ',' + safeCsv(s.party_abbreviation) + ',' + safeCsv(s.total_score) + ',' + pct + '%\n';
         });
 
         csv += '\nSECTION 2: RESULTS VERIFICATION & AUDIT\n';
         csv += 'Party,Voting Centers Total,Announced Total,Difference,Audit Status\n';
         comp.forEach(c => {
-          csv += c.party + ',' + c.summed + ',' + c.announced + ',' + c.difference + ',' + c.status + '\n';
+          csv += safeCsv(c.party) + ',' + safeCsv(c.summed) + ',' + safeCsv(c.announced) + ',' + safeCsv(c.difference) + ',' + safeCsv(c.status) + '\n';
         });
 
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

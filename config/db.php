@@ -23,8 +23,9 @@ function getDB(): PDO {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_TIMEOUT            => 2,
             PDO::ATTR_EMULATE_PREPARES   => false,
-        ];
         $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        // Verify key table exists in the database
+        $pdo->query("SELECT 1 FROM polling_unit LIMIT 1");
         return $pdo;
     } catch (Throwable $e) {
         $sqliteBackup = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'database.sqlite';

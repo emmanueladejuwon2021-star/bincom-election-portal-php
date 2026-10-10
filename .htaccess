@@ -1,10 +1,10 @@
 # Delta State Election Results Portal
-# Apache Configuration
+# Apache Server Configuration
 
 DirectoryIndex index.php
 
-# Protect database files and SQL dumps from direct web access
-<FilesMatch "\.(sqlite|sql|log)$">
+# Deny direct browser access to sensitive files and database files
+<FilesMatch "\.(sqlite|sql|log|env|ya?ml|sh|dockerignore)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -13,6 +13,26 @@ DirectoryIndex index.php
         Deny from all
     </IfModule>
 </FilesMatch>
+
+<Files "Dockerfile">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>
+
+# Prevent directory index listings
+Options -Indexes
+
+# Baseline Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
 
 # Default character set
 AddDefaultCharset UTF-8
