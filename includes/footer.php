@@ -1,0 +1,78 @@
+<footer class="mt-auto py-3 border-top text-muted">
+  <div class="container text-center">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center small">
+      <div class="mb-2 mb-md-0">
+        <strong>Delta State Election Results System</strong> &copy; <?= date('Y') ?> Official Collation Portal
+      </div>
+      <div class="text-secondary d-flex align-items-center gap-2">
+        <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-database-check me-1"></i> Engine: <?= strtoupper(getActiveDriver()) ?> (PDO)</span>
+        <span>Verified Election Records</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- Bootstrap 5 JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Dark / Light Mode Switcher Script with Dynamic Chart Color Adaptation -->
+<script>
+  (function() {
+    const toggleBtn = document.getElementById('themeToggleBtn');
+    const toggleIcon = document.getElementById('themeToggleIcon');
+    const toggleText = document.getElementById('themeToggleText');
+
+    function applyChartTheme(isDark) {
+      if (window.Chart) {
+        Chart.defaults.color = isDark ? '#cbd5e1' : '#64748b';
+        Chart.defaults.borderColor = isDark ? '#334155' : '#f1f5f9';
+        
+        if (Chart.instances) {
+          Object.values(Chart.instances).forEach(chart => {
+            if (chart.options && chart.options.scales) {
+              if (chart.options.scales.x && chart.options.scales.x.ticks) chart.options.scales.x.ticks.color = isDark ? '#cbd5e1' : '#64748b';
+              if (chart.options.scales.y && chart.options.scales.y.ticks) chart.options.scales.y.ticks.color = isDark ? '#cbd5e1' : '#64748b';
+              if (chart.options.scales.y && chart.options.scales.y.grid) chart.options.scales.y.grid.color = isDark ? '#334155' : '#f1f5f9';
+            }
+            if (chart.options && chart.options.plugins && chart.options.plugins.legend && chart.options.plugins.legend.labels) {
+              chart.options.plugins.legend.labels.color = isDark ? '#cbd5e1' : '#64748b';
+            }
+            chart.update();
+          });
+        }
+      }
+    }
+
+    function updateToggleUI(theme) {
+      if (!toggleBtn) return;
+      const isDark = theme === 'dark';
+      if (isDark) {
+        if (toggleIcon) toggleIcon.className = 'bi bi-sun-fill text-warning';
+        if (toggleText) toggleText.textContent = 'Light';
+        toggleBtn.setAttribute('title', 'Switch to Light Mode');
+      } else {
+        if (toggleIcon) toggleIcon.className = 'bi bi-moon-stars-fill text-warning';
+        if (toggleText) toggleText.textContent = 'Dark';
+        toggleBtn.setAttribute('title', 'Switch to Dark Mode');
+      }
+      applyChartTheme(isDark);
+    }
+
+    const currentTheme = document.documentElement.getAttribute('data-bs-theme') || 'light';
+    updateToggleUI(currentTheme);
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', function() {
+        const activeTheme = document.documentElement.getAttribute('data-bs-theme') || 'light';
+        const newTheme = activeTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', newTheme);
+        try {
+          localStorage.setItem('theme', newTheme);
+        } catch (e) {}
+        updateToggleUI(newTheme);
+      });
+    }
+  })();
+</script>
+</body>
+</html>

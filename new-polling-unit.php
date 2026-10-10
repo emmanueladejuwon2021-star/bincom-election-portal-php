@@ -1,0 +1,476 @@
+<?php
+require_once __DIR__ . '/config/db.php';
+
+$pageTitle = 'Submit Polling Unit Returns - Delta State Election Portal';
+$currentPage = 'new-polling-unit';
+
+$errorMessage = null;
+
+// Handle Form Submission (POST)
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        $lgaId = isset($_POST['lga_id']) ? (int)$_POST['lga_id'] : 0;
+        $wardId = isset($_POST['ward_id']) ? (int)$_POST['ward_id'] : 0;
+        $puName = isset($_POST['polling_unit_name']) ? trim($_POST['polling_unit_name']) : '';
+        $puNumber = isset($_POST['polling_unit_number']) ? trim($_POST['polling_unit_number']) : '';
+        $puDesc = isset($_POST['polling_unit_description']) ? trim($_POST['polling_unit_description']) : '';
+        $lat = isset($_POST['lat']) ? trim($_POST['lat']) : null;
+        $long = isset($_POST['long']) ? trim($_POST['long']) : null;
+        $enteredBy = isset($_POST['entered_by_user']) && trim($_POST['entered_by_user']) !== '' ? trim($_POST['entered_by_user']) : 'INEC Presiding Officer';
+
+        if (!$lgaId || !$wardId || empty($puName)) {
+            throw new Exception("Please select a Local Government, Ward, and enter the Polling Unit Name.");
+        }
+
+        $userIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $nowStr = date('Y-m-d H:i:s');
+
+        $pdo = getDB();
+        $pdo->beginTransaction();
+
+        // Determine next polling_unit_id for this ward
+        $maxPu = fetchOne("SELECT MAX(polling_unit_id) as max_id FROM polling_unit WHERE ward_id = ? AND lga_id = ?", [$wardId, $lgaId]);
+        $nextPuId = ($maxPu && $maxPu['max_id']) ? ((int)$maxPu['max_id'] + 1) : 1;
+        $finalPuNumber = !empty($puNumber) ? $puNumber : "DT{$lgaId}{$wardId}00{$nextPuId}";
+
+        // 1. Insert into polling_unit
+        $stmtPu = $pdo->prepare(
+            "INSERT INTO polling_unit (
+              polling_unit_id,
+              ward_id,
+              lga_id,
+              polling_unit_number,
+              polling_unit_name,
+              polling_unit_description,
+              lat,
+              long,
+              entered_by_user,
+              date_entered,
+              user_ip_address
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        );
+        $stmtPu->execute([
+            $nextPuId,
+            $wardId,
+            $lgaId,
+            $finalPuNumber,
+            $puName,
+            !empty($puDesc) ? $puDesc : $puName,
+            $lat,
+            $long,
+            $enteredBy,
+            $nowStr,
+            $userIp
+        ]);
+
+        $newPuUniqueId = $pdo->lastInsertId();
+
+        // 2. Insert party results
+        $parties = fetchAll("SELECT partyid FROM party ORDER BY partyname ASC");
+        $stmtScore = $pdo->prepare(
+            "INSERT INTO announced_pu_results (
+              polling_unit_uniqueid,
+              party_abbreviation,
+              party_score,
+              entered_by_user,
+              date_entered,
+              user_ip_address
+            ) VALUES (?, ?, ?, ?, ?, ?)"
+        );
+
+        foreach ($parties as $p) {
+            $key = 'party_' . $p['partyid'];
+            $rawScore = isset($_POST[$key]) ? (int)$_POST[$key] : 0;
+            $score = max(0, $rawScore);
+
+            $stmtScore->execute([
+                (string)$newPuUniqueId,
+                $p['partyid'],
+                $score,
+                $enteredBy,
+                $nowStr,
+                $userIp
+            ]);
+        }
+
+        // 3. Optional: Insert Accredited Agent into agentname table
+        $agentFirst = isset($_POST['agent_firstname']) ? trim($_POST['agent_firstname']) : '';
+        $agentLast = isset($_POST['agent_lastname']) ? trim($_POST['agent_lastname']) : '';
+        $agentPhone = isset($_POST['agent_phone']) ? trim($_POST['agent_phone']) : '';
+        $agentEmail = isset($_POST['agent_email']) ? trim($_POST['agent_email']) : '';
+
+        if (!empty($agentFirst) && !empty($agentLast)) {
+            $stmtAgent = $pdo->prepare(
+                "INSERT INTO agentname (
+                  firstname,
+                  lastname,
+                  email,
+                  phone,
+                  pollingunit_uniqueid
+                ) VALUES (?, ?, ?, ?, ?)"
+            );
+            $stmtAgent->execute([
+                $agentFirst,
+                $agentLast,
+                !empty($agentEmail) ? $agentEmail : null,
+                !empty($agentPhone) ? $agentPhone : 'N/A',
+                $newPuUniqueId
+            ]);
+        }
+
+        $pdo->commit();
+
+        header("Location: new-polling-unit.php?success=1&new_id=" . $newPuUniqueId);
+        exit;
+    } catch (Throwable $e) {
+        if (isset($pdo) && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $errorMessage = $e->getMessage();
+    }
+}
+
+$lgas = fetchAll("SELECT uniqueid, lga_id, lga_name FROM lga WHERE state_id = 25 ORDER BY lga_name ASC");
+$parties = fetchAll("SELECT * FROM party ORDER BY partyname ASC");
+
+$successMessage = isset($_GET['success']) && $_GET['success'] == '1';
+$createdPuId = isset($_GET['new_id']) ? (int)$_GET['new_id'] : null;
+
+require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/navbar.php';
+?>
+
+<main class="container my-3 my-md-4 flex-grow-1">
+
+  <!-- Executive Hero Banner (Compact) -->
+  <div class="hero-banner p-3 p-md-4 mb-3 mb-md-4 rounded-4 shadow-sm text-white" 
+       style="background: linear-gradient(135deg, #064e3b 0%, #047857 55%, #0d9488 100%); position: relative; overflow: hidden;">
+    
+    <div class="d-none d-md-block" style="position: absolute; right: -25px; bottom: -30px; opacity: 0.12; pointer-events: none;">
+      <i class="bi bi-pencil-square" style="font-size: 14rem;"></i>
+    </div>
+
+    <div class="row align-items-center position-relative" style="z-index: 1;">
+      <div class="col-lg-8">
+        <div class="d-inline-flex align-items-center gap-1 gap-sm-2 px-2 px-sm-3 py-1 mb-2 rounded-pill bg-white bg-opacity-20 text-white small fw-medium backdrop-blur">
+          <i class="bi bi-shield-lock-fill text-warning"></i>
+          Presiding Officer Official Entry &bull; Delta State
+        </div>
+        <h1 class="display-6 fw-extrabold mb-1 text-white">Submit Polling Unit Returns</h1>
+        <p class="lead text-white text-opacity-90 mb-0" style="max-width: 620px;">
+          Register a voting center and record certified ballot returns for all contesting political parties.
+        </p>
+      </div>
+
+      <div class="col-lg-4 text-lg-end mt-2 mt-lg-0">
+        <a href="polling-unit.php" class="btn btn-warning text-dark fw-bold px-3 py-1 py-sm-2 shadow-sm" style="font-size: 0.85rem;">
+          <i class="bi bi-search me-1"></i> Browse Existing Units
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <?php if ($successMessage && $createdPuId): ?>
+    <!-- Success Banner -->
+    <div class="alert alert-success alert-dismissible fade show shadow-sm mb-3 rounded-3 border-0 p-3" role="alert">
+      <div class="d-flex align-items-center">
+        <div class="rounded-circle bg-success text-white p-2 me-2 d-inline-flex flex-shrink-0">
+          <i class="bi bi-check-lg fs-4"></i>
+        </div>
+        <div>
+          <h6 class="alert-heading fw-extrabold mb-0">Results Successfully Recorded!</h6>
+          <div class="small text-secondary">
+            Polling unit registered under ID <strong>#<?= htmlspecialchars($createdPuId) ?></strong>. Certified scores for all <?= count($parties) ?> parties are stored.
+          </div>
+        </div>
+      </div>
+      <div class="mt-2 d-flex gap-2">
+        <a href="polling-unit.php?id=<?= htmlspecialchars($createdPuId) ?>" class="btn btn-sm btn-success fw-bold px-3 py-1 rounded-2 shadow-xs">
+          <i class="bi bi-eye-fill me-1"></i> View Saved Returns
+        </a>
+        <a href="new-polling-unit.php" class="btn btn-sm btn-outline-success fw-semibold px-2 py-1 rounded-2">
+          Submit Another
+        </a>
+      </div>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($errorMessage): ?>
+    <!-- Error Alert -->
+    <div class="alert alert-danger alert-dismissible fade show shadow-sm mb-3 rounded-3 border-0 p-3" role="alert">
+      <i class="bi bi-exclamation-triangle-fill me-1"></i> <?= htmlspecialchars($errorMessage) ?>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+  <?php endif; ?>
+
+  <form action="new-polling-unit.php" method="POST" id="newPuForm" class="needs-validation">
+    <div class="row g-3">
+      <!-- Section 1: Polling Unit Details (Left Column) -->
+      <div class="col-lg-6">
+        <div class="card border-0 shadow-sm rounded-3 h-100 bg-white">
+          <div class="card-header bg-white py-2 py-sm-3 border-bottom d-flex align-items-center">
+            <div class="rounded-3 bg-success-subtle text-success p-1 p-sm-2 me-2 d-inline-flex">
+              <i class="bi bi-geo-alt-fill fs-5"></i>
+            </div>
+            <div>
+              <h5 class="fw-bold mb-0 text-dark">Step 1: Voting Center Details</h5>
+              <div class="text-muted small">Location, designation, and presiding officer</div>
+            </div>
+          </div>
+          <div class="card-body p-2 p-sm-3">
+            <!-- LGA Select -->
+            <div class="mb-2">
+              <label for="newPuLga" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Local Government Area (LGA) <span class="text-danger">*</span>
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-building"></i></span>
+                <select class="form-select border-start-0 py-1 py-sm-2" id="newPuLga" name="lga_id" required>
+                  <option value="">-- Choose LGA --</option>
+                  <?php foreach ($lgas as $l): ?>
+                    <option value="<?= htmlspecialchars($l['lga_id']) ?>"><?= htmlspecialchars($l['lga_name']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+
+            <!-- Ward Select (Dynamic) -->
+            <div class="mb-2">
+              <label for="newPuWard" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Ward <span class="text-danger">*</span>
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-pin-map"></i></span>
+                <select class="form-select border-start-0 py-1 py-sm-2" id="newPuWard" name="ward_id" required disabled>
+                  <option value="">-- Choose LGA first --</option>
+                </select>
+              </div>
+              <div class="form-text text-muted" style="font-size: 0.7rem;">Wards load automatically based on LGA.</div>
+            </div>
+
+            <!-- Polling Unit Name -->
+            <div class="mb-2">
+              <label for="puName" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Polling Unit Name <span class="text-danger">*</span>
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-tag"></i></span>
+                <input type="text" class="form-control border-start-0 py-1 py-sm-2" id="puName" name="polling_unit_name" 
+                       placeholder="e.g. St. Patrick Primary School Compound Unit 4" required>
+              </div>
+            </div>
+
+            <!-- Polling Unit Number / Code -->
+            <div class="mb-2">
+              <label for="puNumber" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Polling Unit Code / Number
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-hash"></i></span>
+                <input type="text" class="form-control border-start-0 py-1 py-sm-2" id="puNumber" name="polling_unit_number" 
+                       placeholder="e.g. DT1708099 (Leave blank to generate automatically)">
+              </div>
+            </div>
+
+            <!-- Description -->
+            <div class="mb-2">
+              <label for="puDesc" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Landmark Description
+              </label>
+              <textarea class="form-control form-control-sm" id="puDesc" name="polling_unit_description" rows="2" 
+                        placeholder="e.g. Near main community market entrance, opposite church gate"></textarea>
+            </div>
+
+            <!-- Lat & Long -->
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <label for="puLat" class="form-label small fw-bold text-muted text-uppercase mb-1" style="font-size: 0.7rem;">Latitude</label>
+                <input type="text" class="form-control form-control-sm" id="puLat" name="lat" placeholder="e.g. 5.5937">
+              </div>
+              <div class="col-6">
+                <label for="puLong" class="form-label small fw-bold text-muted text-uppercase mb-1" style="font-size: 0.7rem;">Longitude</label>
+                <input type="text" class="form-control form-control-sm" id="puLong" name="long" placeholder="e.g. 5.9993">
+              </div>
+            </div>
+
+            <!-- Presiding Officer -->
+            <div class="mb-2">
+              <label for="enteredBy" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+                Official Role (e.g. Presiding Officer)
+              </label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-person-badge"></i></span>
+                <input type="text" class="form-control border-start-0 py-1 py-sm-2" id="enteredBy" name="entered_by_user" 
+                       value="INEC Presiding Officer">
+              </div>
+            </div>
+
+            <!-- Optional: Accredited Polling Agent -->
+            <div class="mt-2 pt-2 border-top">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="fw-bold small text-muted text-uppercase" style="font-size: 0.7rem;">
+                  Party Representative Contact (Optional)
+                </span>
+                <span class="badge bg-light text-muted border" style="font-size: 0.65rem;">Party Representative</span>
+              </div>
+              <div class="row g-1 mb-1">
+                <div class="col-6">
+                  <input type="text" class="form-control form-control-sm" name="agent_firstname" placeholder="Agent First Name">
+                </div>
+                <div class="col-6">
+                  <input type="text" class="form-control form-control-sm" name="agent_lastname" placeholder="Agent Last Name">
+                </div>
+                <div class="col-6">
+                  <input type="tel" class="form-control form-control-sm" name="agent_phone" placeholder="Agent Phone">
+                </div>
+                <div class="col-6">
+                  <input type="email" class="form-control form-control-sm" name="agent_email" placeholder="Agent Email">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Party Scores (Compact 2-Column Grid on Mobile) -->
+      <div class="col-lg-6">
+        <div class="card border-0 shadow-sm rounded-3 h-100 bg-white">
+          <div class="card-header bg-white py-2 py-sm-3 border-bottom d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+              <div class="rounded-3 bg-success-subtle text-success p-1 p-sm-2 me-2 d-inline-flex">
+                <i class="bi bi-card-checklist fs-5"></i>
+              </div>
+              <div>
+                <h5 class="fw-bold mb-0 text-dark">Step 2: Contesting Party Votes</h5>
+                <div class="text-muted small">Enter certified counts from results sheet</div>
+              </div>
+            </div>
+            <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 rounded-pill">
+              <?= count($parties) ?> Parties
+            </span>
+          </div>
+          <div class="card-body p-2 p-sm-3">
+            <p class="text-muted small mb-2" style="font-size: 0.78rem;">
+              Type in the verified vote count for each party. Live tally updates automatically.
+            </p>
+
+            <!-- Compact 2-Column Grid for Parties -->
+            <div class="row g-2 mb-3">
+              <?php foreach ($parties as $p): ?>
+                <div class="col-6 col-md-6">
+                  <div class="p-2 border rounded-3 bg-light party-input-card h-100">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                      <span class="badge bg-dark px-1.5 py-0.5" style="font-size: 0.72rem;"><?= htmlspecialchars($p['partyid']) ?></span>
+                      <span class="text-muted text-truncate ms-1" style="font-size: 0.7rem;"><?= htmlspecialchars($p['partyname']) ?></span>
+                    </div>
+                    <div class="input-group input-group-sm">
+                      <span class="input-group-text bg-white border-end-0 text-muted p-1"><i class="bi bi-pencil-fill" style="font-size: 0.7rem;"></i></span>
+                      <input type="number" 
+                             class="form-control party-score-input text-end fw-bold py-1 border-start-0" 
+                             id="score_<?= htmlspecialchars($p['partyid']) ?>" 
+                             name="party_<?= htmlspecialchars($p['partyid']) ?>" 
+                             min="0" 
+                             placeholder="0" 
+                             value="0" 
+                             required>
+                    </div>
+                  </div>
+                </div>
+              <?php endforeach; ?>
+            </div>
+
+            <!-- Live Total Ballots Counter Card (Compact) -->
+            <div class="p-2 p-sm-3 rounded-3 bg-success bg-opacity-10 border border-success border-opacity-25 mb-3">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <div class="text-success fw-bold text-uppercase small" style="font-size: 0.72rem;">Total Votes Counted</div>
+                  <div class="small text-muted" style="font-size: 0.7rem;">Calculated automatically across all <?= count($parties) ?> parties</div>
+                </div>
+                <div class="text-end">
+                  <div class="fs-4 fw-extrabold text-success mb-0" id="liveTotalVotes">0</div>
+                  <span class="badge bg-success" style="font-size: 0.65rem;">Verified</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Submit Buttons -->
+            <div class="d-grid gap-2">
+              <button type="submit" class="btn btn-success fw-bold py-2 shadow-sm" id="btnSubmitPu">
+                <i class="bi bi-check-circle-fill me-1"></i> Save and Record Results
+              </button>
+              <a href="polling-unit.php" class="btn btn-outline-secondary btn-sm py-1">
+                Cancel
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+</main>
+
+<!-- Client Script for Dynamic Wards and Live Tally -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const lgaSelect = document.getElementById('newPuLga');
+    const wardSelect = document.getElementById('newPuWard');
+    const scoreInputs = document.querySelectorAll('.party-score-input');
+    const liveTotalDisplay = document.getElementById('liveTotalVotes');
+
+    // 1. Dynamic Ward Fetching
+    if (lgaSelect) {
+      lgaSelect.addEventListener('change', function() {
+        const lgaId = this.value;
+        wardSelect.innerHTML = '<option value="">-- Choose Ward --</option>';
+        wardSelect.disabled = true;
+
+        if (!lgaId) return;
+
+        fetch('api/wards.php?lga_id=' + lgaId)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.data.length > 0) {
+              data.data.forEach(w => {
+                const opt = document.createElement('option');
+                opt.value = w.ward_id;
+                opt.textContent = w.ward_name;
+                wardSelect.appendChild(opt);
+              });
+              wardSelect.disabled = false;
+            } else {
+              wardSelect.innerHTML = '<option value="">No wards found</option>';
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching wards:', err);
+            wardSelect.innerHTML = '<option value="">Error loading wards</option>';
+          });
+      });
+    }
+
+    // 2. Real-time Live Vote Tallying
+    function calculateTotal() {
+      let total = 0;
+      scoreInputs.forEach(input => {
+        const val = parseInt(input.value, 10);
+        if (!isNaN(val) && val > 0) {
+          total += val;
+        }
+      });
+      if (liveTotalDisplay) {
+        liveTotalDisplay.textContent = total.toLocaleString();
+      }
+    }
+
+    scoreInputs.forEach(input => {
+      input.addEventListener('input', calculateTotal);
+      input.addEventListener('change', calculateTotal);
+    });
+
+    calculateTotal();
+  });
+</script>
+
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

@@ -1,0 +1,530 @@
+<?php
+require_once __DIR__ . '/config/db.php';
+
+$pageTitle = 'Delta State Election Collation & Results Portal';
+$currentPage = 'home';
+
+// Data queries
+$lgaCountRes = fetchOne("SELECT COUNT(*) as count FROM lga WHERE state_id = 25");
+$puCountRes = fetchOne("SELECT COUNT(*) as count FROM polling_unit");
+$wardCountRes = fetchOne("SELECT COUNT(*) as count FROM ward");
+$reportingPUsRes = fetchOne("SELECT COUNT(DISTINCT polling_unit_uniqueid) as count FROM announced_pu_results");
+
+$partyStandings = fetchAll(
+    "SELECT party_abbreviation, SUM(party_score) as total_votes
+     FROM announced_pu_results
+     GROUP BY party_abbreviation
+     ORDER BY total_votes DESC"
+);
+
+$totalStatewideVotes = array_reduce($partyStandings, function($acc, $p) {
+    return $acc + (int)($p['total_votes'] ?? 0);
+}, 0);
+
+$lgaSummaries = fetchAll(
+    "SELECT 
+      l.lga_id, 
+      l.lga_name,
+      (SELECT COUNT(*) FROM polling_unit pu WHERE pu.lga_id = l.lga_id) as total_pus,
+      (SELECT COUNT(DISTINCT r.polling_unit_uniqueid) 
+       FROM announced_pu_results r 
+       JOIN polling_unit pu ON r.polling_unit_uniqueid = pu.uniqueid OR CAST(r.polling_unit_uniqueid AS CHAR) = CAST(pu.uniqueid AS CHAR)
+       WHERE pu.lga_id = l.lga_id) as reporting_pus,
+      (SELECT COALESCE(SUM(r.party_score), 0)
+       FROM announced_pu_results r 
+       JOIN polling_unit pu ON r.polling_unit_uniqueid = pu.uniqueid OR CAST(r.polling_unit_uniqueid AS CHAR) = CAST(pu.uniqueid AS CHAR)
+       WHERE pu.lga_id = l.lga_id) as total_votes
+    FROM lga l
+    WHERE l.state_id = 25
+    ORDER BY total_votes DESC, l.lga_name ASC"
+);
+
+$recentUnits = fetchAll(
+    "SELECT DISTINCT 
+      pu.uniqueid,
+      pu.polling_unit_name,
+      pu.polling_unit_number,
+      l.lga_name,
+      (SELECT SUM(party_score) FROM announced_pu_results r 
+       WHERE r.polling_unit_uniqueid = pu.uniqueid OR CAST(r.polling_unit_uniqueid AS CHAR) = CAST(pu.uniqueid AS CHAR)) as total_votes
+    FROM announced_pu_results r
+    JOIN polling_unit pu ON r.polling_unit_uniqueid = pu.uniqueid OR CAST(r.polling_unit_uniqueid AS CHAR) = CAST(pu.uniqueid AS CHAR)
+    LEFT JOIN lga l ON pu.lga_id = l.lga_id
+    ORDER BY pu.uniqueid DESC
+    LIMIT 6"
+);
+
+$stats = [
+    'lgas' => $lgaCountRes ? $lgaCountRes['count'] : 25,
+    'pollingUnits' => $puCountRes ? $puCountRes['count'] : 0,
+    'wards' => $wardCountRes ? $wardCountRes['count'] : 0,
+    'reportingPUs' => $reportingPUsRes ? $reportingPUsRes['count'] : 0,
+    'totalVotes' => $totalStatewideVotes
+];
+
+require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/navbar.php';
+?>
+
+<main class="container my-3 my-md-4 flex-grow-1">
+
+  <!-- Executive Header Banner (Compact & Responsive) -->
+  <div class="hero-banner p-3 p-md-4 mb-3 mb-md-4 rounded-4 shadow-sm text-white" 
+       style="background: linear-gradient(135deg, #064e3b 0%, #047857 55%, #0d9488 100%); position: relative; overflow: hidden;">
+    
+    <!-- Background Watermark Pattern -->
+    <div class="d-none d-md-block" style="position: absolute; right: -20px; bottom: -30px; opacity: 0.12; pointer-events: none;">
+      <i class="bi bi-box-seam" style="font-size: 14rem;"></i>
+    </div>
+
+    <div class="row align-items-center position-relative" style="z-index: 1;">
+      <div class="col-lg-8">
+        <div class="d-inline-flex align-items-center gap-1 gap-sm-2 px-2 px-sm-3 py-1 mb-2 rounded-pill bg-white bg-opacity-20 text-white small fw-medium backdrop-blur">
+          <span class="spinner-grow spinner-grow-sm text-warning" role="status" aria-hidden="true" style="width: 7px; height: 7px;"></span>
+          Certified Collation Portal &bull; Delta State
+        </div>
+
+        <h1 class="display-5 fw-extrabold mb-1 text-white">Delta State Election Results</h1>
+        <p class="lead text-white text-opacity-90 mb-3" style="max-width: 620px;">
+          Official public portal for grassroots ballot counts, council aggregations, and collation reconciliation across Delta State.
+        </p>
+
+        <!-- Quick Jump Filter Toolbar -->
+        <div class="p-2 p-sm-3 rounded-3 bg-black bg-opacity-25 border border-white border-opacity-20 mb-2" style="max-width: 650px;">
+          <form action="lga-total.php" method="GET" class="d-flex flex-column flex-sm-row gap-2 align-items-stretch">
+            <select name="lga_id" class="form-select border-0 shadow-none py-1 py-sm-2" required>
+              <option value="">-- Jump to Any Local Government (LGA) --</option>
+              <?php foreach ($lgaSummaries as $l): ?>
+                <option value="<?= htmlspecialchars($l['lga_id']) ?>">
+                  <?= htmlspecialchars($l['lga_name']) ?> (<?= htmlspecialchars($l['reporting_pus']) ?>/<?= htmlspecialchars($l['total_pus']) ?> reporting)
+                </option>
+              <?php endforeach; ?>
+            </select>
+            <button type="submit" class="btn btn-warning text-dark fw-bold px-3 py-1 py-sm-2 flex-shrink-0">
+              <i class="bi bi-arrow-right"></i> View Summary
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Quick Action Shortcuts -->
+      <div class="col-lg-4 mt-3 mt-lg-0">
+        <div class="bg-white bg-opacity-10 p-2 p-sm-3 rounded-3 border border-white border-opacity-20 backdrop-blur">
+          <div class="text-uppercase small text-warning fw-bold mb-1 tracking-wide" style="font-size: 0.75rem;">
+            <i class="bi bi-lightning-charge-fill me-1"></i> Quick Links
+          </div>
+          <div class="row g-1 g-sm-2">
+            <div class="col-6 col-lg-12">
+              <a href="polling-unit.php" class="btn btn-light text-success fw-bold text-start py-1 py-sm-2 px-2 px-sm-3 shadow-sm w-100 text-truncate" style="font-size: 0.82rem;">
+                <i class="bi bi-geo-alt-fill me-1 text-success"></i> Polling Units
+              </a>
+            </div>
+            <div class="col-6 col-lg-12">
+              <a href="lga-total.php" class="btn btn-outline-light text-start py-1 py-sm-2 px-2 px-sm-3 fw-semibold w-100 text-truncate" style="font-size: 0.82rem;">
+                <i class="bi bi-building-fill me-1"></i> LGA Totals
+              </a>
+            </div>
+            <div class="col-12">
+              <a href="new-polling-unit.php" class="btn btn-warning text-dark text-start py-1 py-sm-2 px-2 px-sm-3 fw-bold shadow-sm w-100 text-truncate" style="font-size: 0.82rem;">
+                <i class="bi bi-plus-circle-fill me-1"></i> Submit Returns
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key Statistics KPI Cards (Compact 2x2 on Mobile) -->
+  <div class="row g-2 g-md-3 mb-3 mb-md-4">
+    <div class="col-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm bg-white kpi-card">
+        <div class="card-body d-flex align-items-center">
+          <div class="kpi-icon rounded-3 bg-success-subtle text-success p-2 me-2 flex-shrink-0">
+            <i class="bi bi-check-circle-fill fs-5"></i>
+          </div>
+          <div class="text-truncate">
+            <div class="text-muted kpi-label fw-medium text-truncate">Total Votes</div>
+            <div class="kpi-value fw-bold text-dark text-truncate"><?= number_format($stats['totalVotes'] ?? 0) ?></div>
+            <div class="kpi-sub text-success fw-semibold text-truncate">Verified votes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm bg-white kpi-card">
+        <div class="card-body d-flex align-items-center">
+          <div class="kpi-icon rounded-3 bg-primary-subtle text-primary p-2 me-2 flex-shrink-0">
+            <i class="bi bi-geo-alt-fill fs-5"></i>
+          </div>
+          <div class="text-truncate">
+            <div class="text-muted kpi-label fw-medium text-truncate">Reporting Units</div>
+            <div class="kpi-value fw-bold text-dark text-truncate"><?= $stats['reportingPUs'] ?> / <?= $stats['pollingUnits'] ?></div>
+            <div class="kpi-sub text-muted text-truncate">
+              <?= $stats['pollingUnits'] > 0 ? round(($stats['reportingPUs'] / $stats['pollingUnits']) * 100) : 0 ?>% reporting
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm bg-white kpi-card">
+        <div class="card-body d-flex align-items-center">
+          <div class="kpi-icon rounded-3 bg-warning-subtle text-warning p-2 me-2 flex-shrink-0">
+            <i class="bi bi-trophy-fill fs-5"></i>
+          </div>
+          <div class="text-truncate">
+            <div class="text-muted kpi-label fw-medium text-truncate">Leading Party</div>
+            <div class="kpi-value fw-bold text-dark text-truncate">
+              <?= !empty($partyStandings) ? htmlspecialchars($partyStandings[0]['party_abbreviation']) : 'N/A' ?>
+            </div>
+            <div class="kpi-sub text-warning fw-semibold text-truncate">
+              <?= (!empty($partyStandings) && $totalStatewideVotes > 0) ? number_format(($partyStandings[0]['total_votes'] / $totalStatewideVotes) * 100, 1) . '% share' : 'No votes yet' ?>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm bg-white kpi-card">
+        <div class="card-body d-flex align-items-center">
+          <div class="kpi-icon rounded-3 bg-info-subtle text-info p-2 me-2 flex-shrink-0">
+            <i class="bi bi-building fs-5"></i>
+          </div>
+          <div class="text-truncate">
+            <div class="text-muted kpi-label fw-medium text-truncate">Coverage</div>
+            <div class="kpi-value fw-bold text-dark text-truncate"><?= $stats['lgas'] ?> LGAs</div>
+            <div class="kpi-sub text-info fw-semibold text-truncate"><?= $stats['wards'] ?> Wards</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Statewide Party Standings & Chart Section -->
+  <div class="row g-3 mb-3 mb-md-4">
+    <!-- Party Leaderboard Table -->
+    <div class="col-lg-7">
+      <div class="card border shadow-sm h-100">
+        <div class="card-header bg-white py-2 py-sm-3 d-flex justify-content-between align-items-center">
+          <div>
+            <h5 class="fw-bold mb-0">
+              <i class="bi bi-bar-chart-line-fill text-success me-1"></i>
+              Statewide Party Standings
+            </h5>
+            <div class="text-muted small d-none d-sm-block">Total votes calculated from verified polling unit returns</div>
+          </div>
+          <div class="d-flex align-items-center gap-1.5">
+            <button id="btnExportStateCsv" class="btn btn-sm btn-outline-success py-0.5 px-2 rounded-2" style="font-size: 0.75rem;" title="Download Statewide CSV">
+              <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Export CSV
+            </button>
+            <span class="badge bg-success-subtle text-success border border-success-subtle">
+              <?= count($partyStandings) ?> Parties
+            </span>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col" class="ps-2 ps-sm-3" style="width: 28%;">Party</th>
+                  <th scope="col" style="width: 28%;">Votes</th>
+                  <th scope="col" style="width: 44%;">Percentage (%)</th>
+                  <th scope="col" class="d-none d-sm-table-cell text-end pe-3">Standing</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($partyStandings as $idx => $p): 
+                  $pct = $totalStatewideVotes > 0 ? number_format(($p['total_votes'] / $totalStatewideVotes) * 100, 1) : 0;
+                ?>
+                  <tr class="<?= $idx === 0 ? 'table-success-subtle' : '' ?>">
+                    <td class="ps-2 ps-sm-3">
+                      <span class="fw-bold text-muted me-1 small">#<?= $idx + 1 ?></span>
+                      <span class="badge <?= $idx === 0 ? 'bg-success' : 'bg-dark' ?> px-2 py-1">
+                        <?= htmlspecialchars($p['party_abbreviation']) ?>
+                      </span>
+                    </td>
+                    <td class="fw-bold">
+                      <?= number_format($p['total_votes']) ?>
+                    </td>
+                    <td>
+                      <div class="d-flex align-items-center">
+                        <span class="me-1 small fw-semibold" style="min-width: 38px; font-size: 0.78rem;"><?= $pct ?>%</span>
+                        <div class="progress flex-grow-1" style="height: 6px;">
+                          <div class="progress-bar <?= $idx === 0 ? 'bg-success' : 'bg-primary' ?>" 
+                               role="progressbar" 
+                               style="width: <?= $pct ?>%;" 
+                               aria-valuenow="<?= $pct ?>" 
+                               aria-valuemin="0" 
+                               aria-valuemax="100">
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="d-none d-sm-table-cell text-end pe-3">
+                      <?php if ($idx === 0): ?>
+                        <span class="badge bg-warning text-dark"><i class="bi bi-crown-fill me-1"></i> Leading</span>
+                      <?php else: ?>
+                        <span class="small text-muted"><?= $pct ?>%</span>
+                      <?php endif; ?>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+              <tfoot class="table-light">
+                <tr class="fw-bold">
+                  <td class="ps-2 ps-sm-3">TOTAL</td>
+                  <td class="text-success"><?= number_format($totalStatewideVotes) ?></td>
+                  <td>100.0%</td>
+                  <td class="d-none d-sm-table-cell text-end pe-3">Verified</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Statewide Visual Distribution Chart -->
+    <div class="col-lg-5">
+      <div class="card border shadow-sm h-100">
+        <div class="card-header bg-white py-2 py-sm-3">
+          <h5 class="fw-bold mb-0">
+            <i class="bi bi-pie-chart-fill text-primary me-1"></i>
+            Vote Distribution Share
+          </h5>
+        </div>
+        <div class="card-body d-flex flex-column align-items-center justify-content-center p-2 p-sm-3" style="min-height: 220px;">
+          <canvas id="statewideChart" style="max-height: 220px; width: 100%;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Local Government Directory (Scrollable) -->
+  <div class="card border shadow-sm mb-3 mb-md-4">
+    <div class="card-header bg-white py-2 py-sm-3">
+      <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+        <div>
+          <h5 class="fw-bold mb-0">
+            <i class="bi bi-grid-3x3-gap-fill text-success me-1"></i>
+            Local Government Directory (Delta State)
+          </h5>
+          <div class="text-muted small">All 25 councils &bull; Click to view certified LGA totals</div>
+        </div>
+        <!-- Live Instant Filter Input -->
+        <div style="max-width: 240px; width: 100%;">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light border-end-0"><i class="bi bi-search"></i></span>
+            <input type="text" id="lgaSearchInput" class="form-control border-start-0" placeholder="Filter LGA...">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body p-2 p-sm-3 bg-light">
+      <div class="lga-grid-scroll">
+        <div class="row g-2" id="lgaGridContainer">
+          <?php foreach ($lgaSummaries as $l): 
+            $hasReports = (int)$l['reporting_pus'] > 0;
+          ?>
+            <div class="col-6 col-md-4 col-lg-3 lga-card-item" data-lga-name="<?= strtolower($l['lga_name']) ?>">
+              <a href="lga-total.php?lga_id=<?= htmlspecialchars($l['lga_id']) ?>" class="text-decoration-none">
+                <div class="p-2 bg-white rounded-3 border h-100 shadow-xs hover-lift transition">
+                  <div class="d-flex justify-content-between align-items-start mb-1">
+                    <span class="fw-bold text-dark text-truncate me-1" style="font-size: 0.84rem;"><?= htmlspecialchars($l['lga_name']) ?></span>
+                    <?php if ($hasReports): ?>
+                      <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.65rem; padding: 0.15rem 0.35rem;">
+                        <?= htmlspecialchars($l['reporting_pus']) ?>
+                      </span>
+                    <?php else: ?>
+                      <span class="badge bg-light text-muted border" style="font-size: 0.65rem; padding: 0.15rem 0.35rem;">0</span>
+                    <?php endif; ?>
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center text-muted" style="font-size: 0.72rem;">
+                    <span><?= htmlspecialchars($l['total_pus']) ?> units</span>
+                    <?php if ((int)$l['total_votes'] > 0): ?>
+                      <span class="fw-semibold text-success"><?= number_format($l['total_votes']) ?> v</span>
+                    <?php else: ?>
+                      <span>0 v</span>
+                    <?php endif; ?>
+                  </div>
+                </div>
+              </a>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <div class="text-center text-muted small mt-2 d-sm-none" style="font-size: 0.72rem;">
+        <i class="bi bi-arrows-expand me-1"></i> Scroll box to explore all 25 Local Government Areas
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Reporting Polling Units Showcase -->
+  <div class="card border-0 shadow-sm bg-white mb-3 mb-md-4">
+    <div class="card-header bg-white py-2 py-sm-3 border-bottom d-flex justify-content-between align-items-center">
+      <div>
+        <h5 class="card-title fw-bold mb-0">
+          <i class="bi bi-clock-history text-success me-1"></i> Recently Added Voting Centers
+        </h5>
+        <div class="text-muted small d-none d-sm-block">Latest voting center results added to the system</div>
+      </div>
+      <a href="polling-unit.php" class="btn btn-sm btn-outline-success py-1 px-2" style="font-size: 0.78rem;">Browse All &rarr;</a>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" class="d-none d-sm-table-cell ps-3">Unit ID</th>
+              <th scope="col" class="ps-2 ps-sm-0">Polling Unit</th>
+              <th scope="col" class="d-none d-md-table-cell">Code</th>
+              <th scope="col" class="d-none d-sm-table-cell">LGA</th>
+              <th scope="col">Votes</th>
+              <th scope="col" class="text-end pe-2 pe-sm-3">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php if (!empty($recentUnits)): ?>
+              <?php foreach ($recentUnits as $u): ?>
+                <tr>
+                  <td class="d-none d-sm-table-cell ps-3 fw-bold text-success">#<?= htmlspecialchars($u['uniqueid']) ?></td>
+                  <td class="ps-2 ps-sm-0">
+                    <div class="fw-medium text-dark"><?= htmlspecialchars($u['polling_unit_name']) ?></div>
+                    <div class="d-sm-none text-muted" style="font-size: 0.72rem;">
+                      <span class="badge bg-light text-dark border px-1 py-0"><?= htmlspecialchars($u['lga_name'] ?? 'Delta LGA') ?></span>
+                      <span class="ms-1">#<?= htmlspecialchars($u['uniqueid']) ?></span>
+                    </div>
+                  </td>
+                  <td class="d-none d-md-table-cell"><code><?= htmlspecialchars($u['polling_unit_number'] ?: 'N/A') ?></code></td>
+                  <td class="d-none d-sm-table-cell"><span class="badge bg-light text-dark border"><?= htmlspecialchars($u['lga_name'] ?? 'Delta LGA') ?></span></td>
+                  <td>
+                    <span class="fw-bold text-success"><?= number_format($u['total_votes'] ?? 0) ?></span>
+                  </td>
+                  <td class="text-end pe-2 pe-sm-3">
+                    <a href="polling-unit.php?id=<?= htmlspecialchars($u['uniqueid']) ?>" class="btn btn-sm btn-outline-success py-1 px-2" style="font-size: 0.78rem;">
+                      View <i class="bi bi-chevron-right"></i>
+                    </a>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            <?php else: ?>
+              <tr>
+                <td colspan="6" class="text-center py-3 text-muted">No reporting polling units found.</td>
+              </tr>
+            <?php endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Interactive Scripts -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // 1. Instant LGA Directory Search / Filter
+    const searchInput = document.getElementById('lgaSearchInput');
+    const items = document.querySelectorAll('.lga-card-item');
+
+    if (searchInput) {
+      searchInput.addEventListener('input', function() {
+        const query = this.value.trim().toLowerCase();
+        items.forEach(item => {
+          const name = item.getAttribute('data-lga-name') || '';
+          if (name.includes(query)) {
+            item.style.display = '';
+          } else {
+            item.style.display = 'none';
+          }
+        });
+      });
+    }
+
+    // 2. Statewide Votes Doughnut Chart
+    const chartCanvas = document.getElementById('statewideChart');
+    if (chartCanvas) {
+      const chartCtx = chartCanvas.getContext('2d');
+      const labels = <?= json_encode(array_column($partyStandings, 'party_abbreviation')) ?>;
+      const votes = <?= json_encode(array_map('intval', array_column($partyStandings, 'total_votes'))) ?>;
+
+      const palette = [
+        '#198754', '#0d6efd', '#ffc107', '#dc3545', '#6f42c1', 
+        '#fd7e14', '#20c997', '#0dcaf0', '#6c757d'
+      ];
+
+      new Chart(chartCtx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: votes,
+            backgroundColor: palette.slice(0, labels.length),
+            borderWidth: 2,
+            borderColor: document.documentElement.getAttribute('data-bs-theme') === 'dark' ? '#1e293b' : '#ffffff',
+            hoverOffset: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { 
+              position: 'bottom',
+              labels: {
+                boxWidth: 10,
+                padding: 8,
+                font: { size: 10 }
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return ' ' + context.label + ': ' + context.raw.toLocaleString() + ' votes';
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 3. Statewide CSV Export Generator
+    const btnExportStateCsv = document.getElementById('btnExportStateCsv');
+    if (btnExportStateCsv) {
+      btnExportStateCsv.addEventListener('click', function() {
+        const standings = <?= json_encode($partyStandings) ?>;
+        const totalVotes = <?= json_encode($totalStatewideVotes) ?>;
+
+        let csv = 'DELTA STATE ELECTION STANDINGS SUMMARY\n';
+        csv += 'Total Statewide Ballots:,' + totalVotes + '\n';
+        csv += 'Date Generated:,' + new Date().toLocaleDateString() + '\n\n';
+        csv += 'Rank,Party,Total Ballots,Vote Share (%),Status\n';
+
+        standings.forEach((p, idx) => {
+          const pct = totalVotes > 0 ? ((p.total_votes / totalVotes) * 100).toFixed(2) : 0;
+          const status = idx === 0 ? 'Leading' : 'Contested';
+          csv += (idx + 1) + ',' + p.party_abbreviation + ',' + p.total_votes + ',' + pct + '%,' + status + '\n';
+        });
+
+        csv += 'TOTAL,,' + totalVotes + ',100.00%,Verified\n';
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'delta_state_party_standings.csv');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    }
+  });
+</script>
+
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

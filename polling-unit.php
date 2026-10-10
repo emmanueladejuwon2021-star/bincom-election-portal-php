@@ -1,0 +1,635 @@
+<?php
+require_once __DIR__ . '/config/db.php';
+
+$pageTitle = 'Polling Unit Results - Delta State Election Portal';
+$currentPage = 'polling-unit';
+
+$lgas = fetchAll("SELECT uniqueid, lga_id, lga_name FROM lga WHERE state_id = 25 ORDER BY lga_name ASC");
+
+$initialPuId = isset($_GET['id']) && is_numeric($_GET['id']) ? (int)$_GET['id'] : 8;
+$selectedPU = null;
+$puResults = [];
+$totalVotes = 0;
+$agent = null;
+
+if ($initialPuId) {
+    $selectedPU = fetchOne(
+        "SELECT 
+          pu.*, 
+          l.lga_name,
+          w.ward_name
+        FROM polling_unit pu
+        LEFT JOIN lga l ON pu.lga_id = l.lga_id
+        LEFT JOIN ward w ON pu.ward_id = w.ward_id AND pu.lga_id = w.lga_id
+        WHERE pu.uniqueid = ?",
+        [$initialPuId]
+    );
+
+    if ($selectedPU) {
+        $puResults = fetchAll(
+            "SELECT 
+              result_id,
+              party_abbreviation,
+              party_score,
+              entered_by_user,
+              date_entered
+            FROM announced_pu_results 
+            WHERE polling_unit_uniqueid = ? OR CAST(polling_unit_uniqueid AS CHAR) = ?
+            ORDER BY party_score DESC",
+            [(string)$initialPuId, (string)$initialPuId]
+        );
+
+        $totalVotes = array_reduce($puResults, function($acc, $r) {
+            return $acc + (int)($r['party_score'] ?? 0);
+        }, 0);
+
+        $agent = fetchOne(
+            "SELECT firstname, lastname, email, phone FROM agentname WHERE pollingunit_uniqueid = ? LIMIT 1",
+            [$initialPuId]
+        );
+    }
+}
+
+require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/navbar.php';
+?>
+
+<main class="container my-3 my-md-4 flex-grow-1">
+
+  <!-- Executive Hero Banner (Compact) -->
+  <div class="hero-banner p-3 p-md-4 mb-3 mb-md-4 rounded-4 shadow-sm text-white" 
+       style="background: linear-gradient(135deg, #064e3b 0%, #047857 55%, #0d9488 100%); position: relative; overflow: hidden;">
+    
+    <div class="d-none d-md-block" style="position: absolute; right: -25px; bottom: -30px; opacity: 0.12; pointer-events: none;">
+      <i class="bi bi-geo-alt" style="font-size: 14rem;"></i>
+    </div>
+
+    <div class="row align-items-center position-relative" style="z-index: 1;">
+      <div class="col-lg-8">
+        <div class="d-inline-flex align-items-center gap-1 gap-sm-2 px-2 px-sm-3 py-1 mb-2 rounded-pill bg-white bg-opacity-20 text-white small fw-medium backdrop-blur">
+          <i class="bi bi-patch-check-fill text-warning"></i>
+          Grassroots Polling Verification &bull; Delta State
+        </div>
+        <h1 class="display-6 fw-extrabold mb-1 text-white">Polling Unit Results Portal</h1>
+        <p class="lead text-white text-opacity-90 mb-0" style="max-width: 620px;">
+          Inspect certified ballot counts, vote share distributions, and presiding officer returns.
+        </p>
+      </div>
+
+      <div class="col-lg-4 text-lg-end mt-2 mt-lg-0">
+        <a href="new-polling-unit.php" class="btn btn-warning text-dark fw-bold px-3 py-1 py-sm-2 shadow-sm" style="font-size: 0.85rem;">
+          <i class="bi bi-plus-circle-fill me-1"></i> Submit Unit Returns
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Location Selector Card (Compact with Instant Search) -->
+  <div class="card border-0 shadow-sm mb-3 mb-md-4 rounded-3 bg-white">
+    <div class="card-header bg-white py-2 py-sm-3 border-bottom d-flex align-items-center justify-content-between">
+      <div class="d-flex align-items-center">
+        <div class="rounded-3 bg-success-subtle text-success p-1 p-sm-2 me-2 d-inline-flex">
+          <i class="bi bi-funnel-fill fs-5"></i>
+        </div>
+        <div>
+          <h5 class="fw-bold mb-0 text-dark">Find Voting Center</h5>
+          <div class="text-muted small">Search directly or use the cascading dropdown filter</div>
+        </div>
+      </div>
+      <span class="badge bg-light text-muted border px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+        272 Units
+      </span>
+    </div>
+    <div class="card-body p-2 p-sm-3">
+
+      <!-- Instant Autocomplete Search Bar -->
+      <div class="position-relative mb-3">
+        <label for="globalPuSearch" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+          <i class="bi bi-search text-success me-1"></i> Quick Search Any Unit (by School, Landmark, Code, or ID)
+        </label>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-search"></i></span>
+          <input type="text" id="globalPuSearch" class="form-control border-start-0 py-1 py-sm-2" 
+                 placeholder="Type school, landmark, or code (e.g. Primary, Market, DT, 8)..." autocomplete="off">
+          <button id="btnClearSearch" class="btn btn-outline-secondary d-none" type="button"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <!-- Live Autocomplete Suggestion Dropdown -->
+        <div id="puSearchResults" class="list-group position-absolute w-100 shadow-lg rounded-3 mt-1 d-none" 
+             style="z-index: 1050; max-height: 280px; overflow-y: auto;"></div>
+      </div>
+
+      <div class="row g-2 g-sm-3">
+        <!-- 1. Select LGA -->
+        <div class="col-md-4">
+          <label for="selectLga" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+            1. Local Government Area
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-building"></i></span>
+            <select id="selectLga" class="form-select border-start-0 py-1 py-sm-2">
+              <option value="">-- Choose LGA --</option>
+              <?php foreach ($lgas as $l): ?>
+                <option value="<?= htmlspecialchars($l['lga_id']) ?>" <?= ($selectedPU && (int)$selectedPU['lga_id'] === (int)$l['lga_id']) ? 'selected' : '' ?>>
+                  <?= htmlspecialchars($l['lga_name']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </div>
+
+        <!-- 2. Select Ward -->
+        <div class="col-md-4">
+          <label for="selectWard" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+            2. Ward
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-pin-map"></i></span>
+            <select id="selectWard" class="form-select border-start-0 py-1 py-sm-2" <?= $selectedPU ? '' : 'disabled' ?>>
+              <option value="">-- Choose Ward --</option>
+              <?php if ($selectedPU && !empty($selectedPU['ward_name'])): ?>
+                <option value="<?= htmlspecialchars($selectedPU['ward_id']) ?>" selected><?= htmlspecialchars($selectedPU['ward_name']) ?></option>
+              <?php endif; ?>
+            </select>
+          </div>
+        </div>
+
+        <!-- 3. Select Polling Unit -->
+        <div class="col-md-4">
+          <label for="selectPu" class="form-label fw-bold small text-muted text-uppercase mb-1" style="font-size: 0.72rem;">
+            3. Polling Unit
+          </label>
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-geo-alt"></i></span>
+            <select id="selectPu" class="form-select border-start-0 py-1 py-sm-2" <?= $selectedPU ? '' : 'disabled' ?>>
+              <option value="">-- Choose Polling Unit --</option>
+              <?php if ($selectedPU): ?>
+                <option value="<?= htmlspecialchars($selectedPU['uniqueid']) ?>" selected>
+                  <?= htmlspecialchars($selectedPU['polling_unit_name']) ?> (<?= htmlspecialchars($selectedPU['polling_unit_number'] ?: 'PU') ?>)
+                </option>
+              <?php endif; ?>
+            </select>
+            <button id="btnViewPu" class="btn btn-success fw-semibold px-2 px-sm-3" type="button">
+              <i class="bi bi-search"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Browse Pills for Reported Voting Centers -->
+      <div class="mt-2 pt-2 border-top">
+        <div class="small fw-bold text-muted mb-1" style="font-size: 0.72rem;">
+          <i class="bi bi-lightning-charge-fill text-warning me-1"></i> Quick Browse Active Units:
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+          <?php foreach ([8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as $pId): ?>
+            <a href="polling-unit.php?id=<?= $pId ?>" 
+               class="btn btn-sm <?= ($selectedPU && (int)$selectedPU['uniqueid'] === $pId) ? 'btn-success text-white' : 'btn-light border text-dark' ?> py-0 px-2 rounded-2 quick-browse-btn shadow-xs">
+              PU #<?= $pId ?>
+            </a>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <?php if ($selectedPU): ?>
+    <!-- Selected Polling Unit Results Header (Compact) -->
+    <div class="card border-0 shadow-sm bg-white mb-3 mb-md-4 rounded-3 overflow-hidden">
+      <div class="p-2 p-sm-3 bg-light border-bottom">
+        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+          <div>
+            <div class="d-flex flex-wrap align-items-center gap-1 mb-1">
+              <span class="badge bg-success px-2 py-1 rounded-pill" style="font-size: 0.72rem;">Polling Unit #<?= htmlspecialchars($selectedPU['uniqueid']) ?></span>
+              <span class="badge bg-white text-dark border px-2 py-1 rounded-pill" style="font-size: 0.72rem;">Center Code: <?= htmlspecialchars($selectedPU['polling_unit_number'] ?: 'N/A') ?></span>
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                LGA: <?= htmlspecialchars($selectedPU['lga_name'] ?? 'Delta') ?>
+              </span>
+              <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                Ward: <?= htmlspecialchars($selectedPU['ward_name'] ?? ('Ward ' . $selectedPU['ward_id'])) ?>
+              </span>
+            </div>
+            <h3 class="fw-bold text-dark mb-0 fs-5"><?= htmlspecialchars($selectedPU['polling_unit_name']) ?></h3>
+            <p class="text-muted small mb-0" style="font-size: 0.75rem;">
+              <i class="bi bi-info-circle me-1"></i>
+              <?= htmlspecialchars($selectedPU['polling_unit_description'] ?: 'Designated voting location') ?>
+              <?php if (!empty($selectedPU['lat']) && !empty($selectedPU['long'])): ?>
+                &bull; <i class="bi bi-geo-alt"></i> Location Coordinates: <?= htmlspecialchars($selectedPU['lat']) ?>, <?= htmlspecialchars($selectedPU['long']) ?>
+              <?php endif; ?>
+            </p>
+          </div>
+
+          <div class="text-sm-end d-flex align-items-center gap-2">
+            <!-- One-Click CSV Export Button -->
+            <?php if (!empty($puResults)): ?>
+              <button id="btnExportPuCsv" class="btn btn-sm btn-outline-success fw-bold px-2.5 py-1 rounded-2 shadow-xs" title="Export as CSV">
+                <i class="bi bi-file-earmark-spreadsheet-fill me-1"></i> Export CSV
+              </button>
+            <?php endif; ?>
+
+            <div class="p-2 bg-white rounded-3 border shadow-xs d-inline-block text-center" style="min-width: 120px;">
+              <div class="text-muted small text-uppercase fw-bold" style="font-size: 0.65rem;">Total Votes</div>
+              <div class="fs-4 fw-extrabold text-success mb-0">
+                <?= number_format($totalVotes) ?>
+              </div>
+              <div class="small text-muted" style="font-size: 0.68rem;"><?= count($puResults) ?> parties</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unit KPI Row (Compact) -->
+      <?php if (!empty($puResults)): 
+        $leadingParty = $puResults[0];
+        $leadingPct = $totalVotes > 0 ? number_format(($leadingParty['party_score'] / $totalVotes) * 100, 1) : 0;
+      ?>
+        <div class="p-2 bg-white">
+          <div class="row g-1 text-center" style="font-size: 0.8rem;">
+            <div class="col-4 border-end">
+              <div class="text-muted small" style="font-size: 0.7rem;">Leader</div>
+              <div class="fw-bold text-warning">
+                <i class="bi bi-crown-fill me-1"></i> <?= htmlspecialchars($leadingParty['party_abbreviation']) ?>
+              </div>
+            </div>
+            <div class="col-4 border-end">
+              <div class="text-muted small" style="font-size: 0.7rem;">Share</div>
+              <div class="fw-bold text-dark"><?= $leadingPct ?>%</div>
+            </div>
+            <div class="col-4">
+              <div class="text-muted small" style="font-size: 0.7rem;">Official</div>
+              <div class="fw-bold text-dark text-truncate px-1"><?= htmlspecialchars($leadingParty['entered_by_user'] ?: 'Certified') ?></div>
+            </div>
+          </div>
+        </div>
+      <?php endif; ?>
+
+      <!-- Accredited Agent Display -->
+      <?php if ($agent): ?>
+        <div class="px-3 py-2 bg-light border-top d-flex flex-wrap align-items-center gap-2" style="font-size: 0.75rem;">
+          <span class="badge bg-secondary">Accredited Agent</span>
+          <span class="fw-bold text-dark"><i class="bi bi-person-fill me-1"></i> <?= htmlspecialchars($agent['firstname'] . ' ' . $agent['lastname']) ?></span>
+          <?php if (!empty($agent['phone']) && $agent['phone'] !== 'N/A'): ?>
+            <span class="text-muted">&bull; <i class="bi bi-telephone me-0.5"></i> <?= htmlspecialchars($agent['phone']) ?></span>
+          <?php endif; ?>
+          <?php if (!empty($agent['email'])): ?>
+            <span class="text-muted">&bull; <i class="bi bi-envelope me-0.5"></i> <?= htmlspecialchars($agent['email']) ?></span>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <?php if (!empty($puResults)): ?>
+      <!-- Results Table and Chart -->
+      <div class="row g-3">
+        <!-- Results Table Column -->
+        <div class="col-lg-7">
+          <div class="card border-0 shadow-sm rounded-3 h-100 bg-white">
+            <div class="card-header bg-white py-2 py-sm-3 border-bottom d-flex justify-content-between align-items-center">
+              <div>
+                <h5 class="fw-bold mb-0 text-dark">
+                  <i class="bi bi-card-checklist text-success me-1"></i> Certified Party Scores
+                </h5>
+                <div class="text-muted small d-none d-sm-block">Official presiding officer ballot tally</div>
+              </div>
+              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 rounded-pill">
+                <?= count($puResults) ?> Parties
+              </span>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="puResultsTable">
+                  <thead class="table-light">
+                    <tr>
+                      <th scope="col" class="ps-2 ps-sm-3" style="width: 28%;">Party</th>
+                      <th scope="col" style="width: 28%;">Votes</th>
+                      <th scope="col" style="width: 44%;">Percentage (%)</th>
+                      <th scope="col" class="d-none d-sm-table-cell text-end pe-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <?php foreach ($puResults as $idx => $r): 
+                      $pct = $totalVotes > 0 ? number_format(($r['party_score'] / $totalVotes) * 100, 1) : 0;
+                    ?>
+                      <tr class="<?= $idx === 0 ? 'table-success-subtle' : '' ?>">
+                        <td class="ps-2 ps-sm-3">
+                          <span class="badge <?= $idx === 0 ? 'bg-success' : 'bg-dark' ?> px-2 py-1 rounded-2">
+                            <?= htmlspecialchars($r['party_abbreviation']) ?>
+                          </span>
+                        </td>
+                        <td class="fw-bold text-dark">
+                          <?= number_format($r['party_score']) ?>
+                        </td>
+                        <td>
+                          <div class="d-flex align-items-center">
+                            <span class="me-1 small fw-bold" style="min-width: 38px; font-size: 0.78rem;"><?= $pct ?>%</span>
+                            <div class="progress flex-grow-1" style="height: 6px;">
+                              <div class="progress-bar <?= $idx === 0 ? 'bg-success' : 'bg-primary' ?>" 
+                                   role="progressbar" 
+                                   style="width: <?= $pct ?>%;" 
+                                   aria-valuenow="<?= $pct ?>" 
+                                   aria-valuemin="0" 
+                                   aria-valuemax="100">
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="d-none d-sm-table-cell text-end pe-3">
+                          <?php if ($idx === 0): ?>
+                            <span class="badge bg-warning text-dark px-2 py-1"><i class="bi bi-check-circle-fill me-1"></i> Winner</span>
+                          <?php else: ?>
+                            <span class="small text-muted">Contested</span>
+                          <?php endif; ?>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                  <tfoot class="table-light">
+                    <tr class="fw-bold">
+                      <td class="ps-2 ps-sm-3">TOTAL</td>
+                      <td class="text-success"><?= number_format($totalVotes) ?></td>
+                      <td>100.0%</td>
+                      <td class="d-none d-sm-table-cell text-end pe-3">Certified</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Visual Analytics Chart Column -->
+        <div class="col-lg-5">
+          <div class="card border-0 shadow-sm rounded-3 h-100 bg-white">
+            <div class="card-header bg-white py-2 py-sm-3 border-bottom">
+              <h5 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-bar-chart-fill text-primary me-1"></i> Score Distribution
+              </h5>
+            </div>
+            <div class="card-body d-flex flex-column align-items-center justify-content-center p-2 p-sm-3" style="min-height: 220px;">
+              <canvas id="puChart" style="max-height: 220px; width: 100%;"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    <?php else: ?>
+      <!-- Empty State -->
+      <div class="card border-0 shadow-sm bg-white rounded-3 p-4 text-center my-3">
+        <div class="rounded-circle bg-warning-subtle text-warning p-3 d-inline-flex mx-auto mb-2">
+          <i class="bi bi-hourglass-split fs-3"></i>
+        </div>
+        <h5 class="fw-bold text-dark mb-1">No Certified Results on File</h5>
+        <p class="text-muted small mb-3" style="max-width: 460px; margin: 0 auto;">
+          This voting center has not submitted certified ballot returns yet. You can submit presiding officer returns now.
+        </p>
+        <div>
+          <a href="new-polling-unit.php" class="btn btn-sm btn-warning text-dark fw-bold px-3 py-1 shadow-xs">
+            <i class="bi bi-plus-circle-fill me-1"></i> Submit Returns for This Unit
+          </a>
+        </div>
+      </div>
+    <?php endif; ?>
+
+  <?php else: ?>
+    <!-- Initial Prompt -->
+    <div class="card border-0 shadow-sm bg-white rounded-3 p-4 text-center">
+      <div class="rounded-circle bg-success-subtle text-success p-3 d-inline-flex mx-auto mb-2">
+        <i class="bi bi-geo-alt fs-3"></i>
+      </div>
+      <h5 class="fw-bold text-dark mb-1">Select a Polling Unit Above</h5>
+      <p class="text-muted small mb-0">Use the cascaded dropdown filter or instant search to view certified results.</p>
+    </div>
+  <?php endif; ?>
+
+</main>
+
+<!-- Chained Dropdown, Instant Search, CSV Export, and Chart Script -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const lgaSelect = document.getElementById('selectLga');
+    const wardSelect = document.getElementById('selectWard');
+    const puSelect = document.getElementById('selectPu');
+    const btnViewPu = document.getElementById('btnViewPu');
+
+    // 1. Instant Search Autocomplete
+    const searchInput = document.getElementById('globalPuSearch');
+    const searchResults = document.getElementById('puSearchResults');
+    const clearBtn = document.getElementById('btnClearSearch');
+    let searchDebounceTimer;
+
+    if (searchInput) {
+      searchInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        clearTimeout(searchDebounceTimer);
+
+        if (clearBtn) {
+          clearBtn.classList.toggle('d-none', query.length === 0);
+        }
+
+        if (query.length < 1) {
+          searchResults.classList.add('d-none');
+          searchResults.innerHTML = '';
+          return;
+        }
+
+        searchDebounceTimer = setTimeout(() => {
+          fetch('api/search.php?q=' + encodeURIComponent(query))
+            .then(res => res.json())
+            .then(res => {
+              if (res.success && res.data.length > 0) {
+                searchResults.innerHTML = res.data.map(item => `
+                  <a href="polling-unit.php?id=${item.uniqueid}" class="list-group-item list-group-item-action py-2 px-3">
+                    <div class="d-flex justify-content-between align-items-center mb-0.5">
+                      <strong class="text-dark small">${item.polling_unit_name}</strong>
+                      ${item.has_results > 0 
+                        ? '<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 0.65rem;">Certified Results</span>' 
+                        : '<span class="badge bg-light text-muted border" style="font-size: 0.65rem;">Pending</span>'}
+                    </div>
+                    <div class="text-muted small" style="font-size: 0.72rem;">
+                      <span class="badge bg-light text-dark border px-1 py-0 me-1">${item.lga_name || 'Delta'}</span>
+                      <span>Ward: ${item.ward_name || 'Ward'}</span>
+                      <span class="ms-1">&bull; Code: <code>${item.polling_unit_number || 'N/A'}</code></span>
+                    </div>
+                  </a>
+                `).join('');
+                searchResults.classList.remove('d-none');
+              } else {
+                searchResults.innerHTML = '<div class="list-group-item text-muted small py-2 px-3">No matching polling units found</div>';
+                searchResults.classList.remove('d-none');
+              }
+            })
+            .catch(err => console.error('Search error:', err));
+        }, 220);
+      });
+
+      if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+          searchInput.value = '';
+          searchResults.classList.add('d-none');
+          clearBtn.classList.add('d-none');
+          searchInput.focus();
+        });
+      }
+
+      document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+          searchResults.classList.add('d-none');
+        }
+      });
+    }
+
+    // 2. LGA change -> Load Wards
+    if (lgaSelect) {
+      lgaSelect.addEventListener('change', function() {
+        const lgaId = this.value;
+        wardSelect.innerHTML = '<option value="">-- Choose Ward --</option>';
+        puSelect.innerHTML = '<option value="">-- Choose Polling Unit --</option>';
+        wardSelect.disabled = true;
+        puSelect.disabled = true;
+
+        if (!lgaId) return;
+
+        fetch('api/wards.php?lga_id=' + lgaId)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.data.length > 0) {
+              data.data.forEach(w => {
+                const opt = document.createElement('option');
+                opt.value = w.ward_id;
+                opt.textContent = w.ward_name;
+                wardSelect.appendChild(opt);
+              });
+              wardSelect.disabled = false;
+            }
+          })
+          .catch(err => console.error('Error fetching wards:', err));
+      });
+    }
+
+    // 3. Ward change -> Load Polling Units
+    if (wardSelect) {
+      wardSelect.addEventListener('change', function() {
+        const wardId = this.value;
+        const lgaId = lgaSelect.value;
+        puSelect.innerHTML = '<option value="">-- Choose Polling Unit --</option>';
+        puSelect.disabled = true;
+
+        if (!wardId) return;
+
+        fetch('api/polling-units.php?ward_id=' + wardId + '&lga_id=' + lgaId)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.data.length > 0) {
+              data.data.forEach(pu => {
+                const opt = document.createElement('option');
+                opt.value = pu.uniqueid;
+                opt.textContent = `${pu.polling_unit_name} (${pu.polling_unit_number || 'PU'})`;
+                puSelect.appendChild(opt);
+              });
+              puSelect.disabled = false;
+            }
+          })
+          .catch(err => console.error('Error fetching polling units:', err));
+      });
+    }
+
+    // 4. Navigate to selected Polling Unit
+    function navigateToPU() {
+      const puId = puSelect.value;
+      if (puId) {
+        window.location.href = 'polling-unit.php?id=' + puId;
+      }
+    }
+
+    if (btnViewPu) btnViewPu.addEventListener('click', navigateToPU);
+    if (puSelect) puSelect.addEventListener('change', navigateToPU);
+
+    // 5. One-Click CSV Export Generator
+    const btnExportPuCsv = document.getElementById('btnExportPuCsv');
+    if (btnExportPuCsv) {
+      btnExportPuCsv.addEventListener('click', function() {
+        <?php if ($selectedPU && !empty($puResults)): ?>
+          const puName = <?= json_encode($selectedPU['polling_unit_name']) ?>;
+          const puCode = <?= json_encode($selectedPU['polling_unit_number'] ?: 'N/A') ?>;
+          const lgaName = <?= json_encode($selectedPU['lga_name'] ?: 'Delta') ?>;
+          const wardName = <?= json_encode($selectedPU['ward_name'] ?: '') ?>;
+          const puId = <?= json_encode($selectedPU['uniqueid']) ?>;
+          const total = <?= json_encode($totalVotes) ?>;
+          const results = <?= json_encode($puResults) ?>;
+
+          let csv = 'DELTA STATE OFFICIAL ELECTION RESULTS\n';
+          csv += `Polling Unit:,"${puName}"\n`;
+          csv += `Unit Code:,${puCode}\n`;
+          csv += `Unit ID:,${puId}\n`;
+          csv += `Local Government:,${lgaName}\n`;
+          csv += `Ward:,${wardName}\n`;
+          csv += `Total Certified Ballots:,${total}\n\n`;
+          csv += 'Rank,Party,Votes Counted,Percentage (%),Status\n';
+
+          results.forEach((r, idx) => {
+            const pct = total > 0 ? ((r.party_score / total) * 100).toFixed(2) : 0;
+            const status = idx === 0 ? 'Winner' : 'Contested';
+            csv += `${idx + 1},${r.party_abbreviation},${r.party_score},${pct}%,${status}\n`;
+          });
+
+          csv += `TOTAL,,${total},100.00%,Certified\n`;
+
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.setAttribute('href', url);
+          link.setAttribute('download', `polling_unit_${puId}_results.csv`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        <?php endif; ?>
+      });
+    }
+
+    // 6. Chart.js initialization
+    <?php if ($selectedPU && !empty($puResults)): ?>
+      const ctx = document.getElementById('puChart').getContext('2d');
+      const partyLabels = <?= json_encode(array_column($puResults, 'party_abbreviation')) ?>;
+      const scores = <?= json_encode(array_map('intval', array_column($puResults, 'party_score'))) ?>;
+
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: partyLabels,
+          datasets: [{
+            label: 'Certified Votes',
+            data: scores,
+            backgroundColor: partyLabels.map((_, i) => i === 0 ? '#198754' : '#0d6efd'),
+            borderRadius: 4,
+            borderSkipped: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return ` ${context.raw.toLocaleString()} votes`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { size: 10 } },
+              grid: { color: document.documentElement.getAttribute('data-bs-theme') === 'dark' ? '#334155' : '#f1f5f9' }
+            },
+            x: {
+              ticks: { font: { size: 10 } },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    <?php endif; ?>
+  });
+</script>
+
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

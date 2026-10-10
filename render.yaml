@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bincom-election-portal-php
+    runtime: docker
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false

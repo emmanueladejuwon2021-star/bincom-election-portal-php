@@ -1,0 +1,51 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-success shadow-sm sticky-top">
+  <div class="container">
+    <a class="navbar-brand d-flex align-items-center fw-bold text-truncate" href="index.php">
+      <i class="bi bi-box-seam-fill me-2 fs-4 text-warning"></i>
+      <span>Delta State Election Portal</span>
+    </a>
+
+    <!-- Theme Toggle & Mobile Menu Controls -->
+    <div class="d-flex align-items-center gap-2 order-lg-last ms-auto ms-lg-3">
+      <!-- Theme Toggle Button -->
+      <button id="themeToggleBtn" 
+              class="btn btn-outline-light btn-sm rounded-pill px-2 py-1 d-flex align-items-center gap-1 shadow-xs border-opacity-75" 
+              type="button" 
+              aria-label="Toggle dark/light theme" 
+              title="Toggle Dark / Light Mode">
+        <i id="themeToggleIcon" class="bi bi-moon-stars-fill text-warning"></i>
+        <span id="themeToggleText" class="d-none d-md-inline small fw-semibold">Dark</span>
+      </button>
+
+      <!-- Mobile Hamburger Toggler -->
+      <button class="navbar-toggler border-0 p-1" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+    </div>
+    
+    <div class="collapse navbar-collapse" id="mainNavbar">
+      <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
+        <li class="nav-item">
+          <a class="nav-link <?= ($currentPage ?? '') === 'home' ? 'active fw-bold' : '' ?>" href="index.php">
+            <i class="bi bi-speedometer2 me-1"></i> Dashboard
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link <?= ($currentPage ?? '') === 'polling-unit' ? 'active fw-bold' : '' ?>" href="polling-unit.php">
+            <i class="bi bi-geo-alt-fill me-1"></i> Polling Unit Results
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link <?= ($currentPage ?? '') === 'lga-total' ? 'active fw-bold' : '' ?>" href="lga-total.php">
+            <i class="bi bi-building-fill me-1"></i> LGA Totals
+          </a>
+        </li>
+        <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
+          <a class="btn btn-warning text-dark fw-semibold btn-sm px-3 shadow-sm" href="new-polling-unit.php">
+            <i class="bi bi-plus-circle-fill me-1"></i> Enter New Results
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
