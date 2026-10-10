@@ -7,9 +7,26 @@ $currentPage = 'login';
 $error = null;
 $redirectTarget = isset($_GET['redirect']) ? trim($_GET['redirect']) : 'new-polling-unit.php';
 
+// Safe redirect validator: only allow relative paths within the app
+function isSafeRedirect(string $url): bool {
+    if ($url === '' || $url === '/') return false;
+    // Block protocol-relative, absolute URLs, and dangerous schemes
+    if (preg_match('#^(https?:)?//#i', $url) || preg_match('#^[a-z][a-z0-9+.-]*:#i', $url)) {
+        return false;
+    }
+    // Allow relative paths that don't traverse directories
+    if (str_contains($url, '..') || str_contains($url, '\\')) return false;
+    $path = parse_url($url, PHP_URL_PATH) ?: $url;
+    $base = basename($path);
+    $allowed = ['index.php', 'polling-unit.php', 'lga-total.php', 'new-polling-unit.php', 'login.php'];
+    return in_array($base, $allowed, true) || (!str_starts_with($url, '/') && !str_contains($url, '://'));
+}
+
+
 // If already logged in, redirect straight away
 if (isLoggedIn()) {
-    header("Location: " . (!empty($redirectTarget) ? $redirectTarget : 'new-polling-unit.php'));
+    $dest = isSafeRedirect($redirectTarget) ? $redirectTarget : 'new-polling-unit.php';
+    header("Location: " . $dest);
     exit;
 }
 
@@ -21,11 +38,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($email) || empty($password)) {
         $error = "Please enter both your email address and password.";
     } elseif ($email === ADMIN_EMAIL && $password === ADMIN_PASSWORD) {
+        // Prevent session fixation
+        session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
         $_SESSION['admin_email'] = $email;
         $_SESSION['login_time'] = time();
 
-        $destination = (!empty($redirect) && !str_starts_with($redirect, 'http')) ? $redirect : 'new-polling-unit.php';
+        $destination = isSafeRedirect($redirect) ? $redirect : 'new-polling-unit.php';
         header("Location: {$destination}");
         exit;
     } else {
