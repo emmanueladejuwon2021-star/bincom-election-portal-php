@@ -57,24 +57,11 @@ To prevent unauthorized changes and ensure election integrity, recording new vot
 
 ---
 
-## Technical Stack & Architecture
+## Technical Stack & Standards
 
 - **Backend**: Native PHP 8.x with PDO (PHP Data Objects). No external frameworks.
 - **Database**: MySQL (`bincom_test`) with complete schema dump (`bincom_test.sql`).
 - **Frontend**: Bootstrap 5.3, Bootstrap Icons, and Chart.js.
 - **Security**: Prepared statements across all database queries to prevent SQL injection.
-- **Containerization**: Production Docker setup containing Apache, PHP 8.3, and an internal MySQL service for cloud hosting.
+- **Access Control**: Session-based administrator authentication for recording new returns.
 
----
-
-## Cloud Deployment on Render
-
-This repository includes a production Docker setup that packages Apache, PHP 8.3, and the MySQL database engine together for deployment:
-
-1. Open your [Render Dashboard](https://dashboard.render.com).
-2. Click **New +** and select **Web Service**.
-3. Connect this GitHub repository.
-4. Set the runtime to **Docker** (Render detects the `Dockerfile` automatically).
-5. Choose the **Free** plan.
-6. *(Optional)* Add your preferred `ADMIN_EMAIL` and `ADMIN_PASSWORD` under the **Environment Variables** tab.
-7. Click **Deploy Web Service**. Render builds the image, starts the web and database services, imports the election dataset, and generates your public web link.
