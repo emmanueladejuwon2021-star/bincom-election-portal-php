@@ -2,11 +2,10 @@
   <div class="container text-center">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-center small">
       <div class="mb-2 mb-md-0">
-        <strong>Delta State Election Results System</strong> &copy; <?= date('Y') ?> Official Collation Portal
+        <strong>Delta State Election Results Portal</strong> &copy; <?= date('Y') ?>
       </div>
-      <div class="text-secondary d-flex align-items-center gap-2">
-        <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-database-check me-1"></i> Engine: <?= strtoupper(getActiveDriver()) ?> (PDO)</span>
-        <span>Verified Election Records</span>
+      <div class="text-secondary">
+        <span>Certified Collation & Reporting System</span>
       </div>
     </div>
   </div>

@@ -389,7 +389,7 @@ require_once __DIR__ . '/includes/navbar.php';
     <?php endif; ?>
 
   <?php else: ?>
-    <!-- Initial Prompt -->
+    <!-- Selection State -->
     <div class="card border-0 shadow-sm bg-white rounded-3 p-4 text-center">
       <div class="rounded-circle bg-success-subtle text-success p-3 d-inline-flex mx-auto mb-2">
         <i class="bi bi-geo-alt fs-3"></i>
