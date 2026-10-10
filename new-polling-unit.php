@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/includes/auth.php';
+
+// Restrict access to authenticated electoral officers only
+requireAuth();
 
 $pageTitle = 'Submit Polling Unit Returns - Delta State Election Portal';
 $currentPage = 'new-polling-unit';

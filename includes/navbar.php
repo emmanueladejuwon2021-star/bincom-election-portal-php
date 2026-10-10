@@ -1,3 +1,6 @@
+<?php
+require_once __DIR__ . '/auth.php';
+?>
 <nav class="navbar navbar-expand-lg navbar-dark bg-success shadow-sm sticky-top">
   <div class="container">
     <a class="navbar-brand d-flex align-items-center fw-bold text-truncate" href="index.php">
@@ -40,11 +43,33 @@
             <i class="bi bi-building-fill me-1"></i> LGA Totals
           </a>
         </li>
-        <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
-          <a class="btn btn-warning text-dark fw-semibold btn-sm px-3 shadow-sm" href="new-polling-unit.php">
-            <i class="bi bi-plus-circle-fill me-1"></i> Enter New Results
-          </a>
-        </li>
+
+        <?php if (isLoggedIn()): ?>
+          <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
+            <a class="btn btn-warning text-dark fw-semibold btn-sm px-3 shadow-sm" href="new-polling-unit.php">
+              <i class="bi bi-plus-circle-fill me-1"></i> Enter New Results
+            </a>
+          </li>
+          <li class="nav-item ms-lg-2 mt-2 mt-lg-0 d-flex align-items-center">
+            <span class="badge bg-white bg-opacity-20 text-white d-none d-xl-inline me-2 py-1 px-2 small">
+              <i class="bi bi-shield-check text-warning me-1"></i><?= htmlspecialchars(getLoggedInUser()) ?>
+            </span>
+            <a class="btn btn-outline-light btn-sm" href="logout.php" title="Sign Out">
+              <i class="bi bi-box-arrow-right me-1"></i> Sign Out
+            </a>
+          </li>
+        <?php else: ?>
+          <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
+            <a class="btn btn-warning text-dark fw-semibold btn-sm px-3 shadow-sm" href="new-polling-unit.php">
+              <i class="bi bi-shield-lock me-1"></i> Enter New Results
+            </a>
+          </li>
+          <li class="nav-item ms-lg-1">
+            <a class="nav-link <?= ($currentPage ?? '') === 'login' ? 'active fw-bold' : '' ?>" href="login.php">
+              <i class="bi bi-person-lock me-1"></i> Sign In
+            </a>
+          </li>
+        <?php endif; ?>
       </ul>
     </div>
   </div>
